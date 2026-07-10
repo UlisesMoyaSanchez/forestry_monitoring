@@ -1,0 +1,23 @@
+# CCAI Summer School 2026 — Deforestation SITS tutorial
+# Core dependencies needed to run the tutorial notebook.
+# Tested with Python 3.11. Versions pinned for reproducibility; on Google Colab
+# most of these are pre-installed and pip will simply confirm them.
+
+numpy==1.26.4
+pandas==2.2.2
+matplotlib==3.8.4
+scikit-learn==1.4.2
+torch==2.2.2
+codecarbon==2.4.1
+
+# --- Optional: only needed for the "fetch real satellite data live" bonus section ---
+# pystac-client==0.7.7
+# planetary-computer==1.0.0
+# odc-stac==0.3.10
+
+# --- Optional: only needed to REBUILD the dataset with data_prep/build_dataset.py ---
+# (creators only; participants download the ready-made CSV)
+# geopandas==0.14.4
+# shapely==2.0.4
+# rioxarray==0.15.5
+# pyproj==3.6.1

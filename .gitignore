@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# CodeCarbon output (written by the tutorial's EmissionsTracker)
+emissions.csv
+.codecarbon.config
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Large source PDF not meant for the repo
+*.pdf

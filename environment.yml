@@ -1,0 +1,26 @@
+name: forestry-ccai
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - pytorch-cpu
+  - geopandas
+  - rioxarray
+  - odc-stac
+  - pystac-client
+  - planetary-computer
+  - shapely
+  - pyproj
+  - xarray
+  - dask
+  - bottleneck
+  - requests
+  - jupyter
+  - nbconvert
+  - pip
+  - pip:
+      - codecarbon
