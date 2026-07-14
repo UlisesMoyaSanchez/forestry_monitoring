@@ -21,3 +21,7 @@ codecarbon==2.4.1
 # shapely==2.0.4
 # rioxarray==0.15.5
 # pyproj==3.6.1
+
+# --- Optional: only needed to REBUILD the AlphaEarth embedding CSV with ---
+# data_prep/build_alphaearth.py (creators only; requires Earth Engine auth)
+# earthengine-api==1.5.12

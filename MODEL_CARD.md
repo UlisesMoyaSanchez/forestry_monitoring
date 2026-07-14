@@ -1,16 +1,25 @@
-# Model Card — 1D-CNN Deforestation Classifier (teaching model)
+# Model Card — Deforestation SITS Classifiers (teaching models)
 
-*Following Mitchell et al., "Model Cards for Model Reporting" (2019). This model is
-a demonstration built for the CCAI Summer School 2026 "AI for Forestry" tutorial.*
+*Following Mitchell et al., "Model Cards for Model Reporting" (2019). These models
+are demonstrations built for the CCAI Summer School 2026 "AI for Forestry"
+tutorial.*
 
 ## Model details
-- **Type.** Small 1D Convolutional Neural Network (2 Conv1d layers → global average
-  pooling → linear head), < 10k parameters, implemented in PyTorch.
-- **Input.** A single-channel NDVI time series of ~24 time steps (one year).
+- **`SITSCNN`.** Small 1D Convolutional Neural Network (2 Conv1d layers → global
+  average pooling → linear head), < 10k parameters, implemented in PyTorch.
+  Input: a single-channel NDVI time series of ~24 time steps (one year).
+- **`SITSTransformer`.** Tiny transformer encoder (linear input projection,
+  learned positional embedding, 1 self-attention layer with 2 heads,
+  `d_model=32`, dropout 0.2, mean-pool → linear head), ~10k parameters. Input:
+  any `(batch, T, C)` sequence — used in two configurations:
+  1. the NDVI series (`T=24, C=1`), directly comparable to `SITSCNN`;
+  2. multi-year **AlphaEarth** annual embeddings (`T=5` years 2018–2022,
+     `C=64`), i.e. foundation-model features instead of a hand-crafted index.
 - **Output.** A class among `forest`, `deforested`, `old_clearing`.
-- **Training.** Cross-entropy loss, Adam optimiser, ~150 full-batch epochs. Trains in
-  a few minutes on CPU.
-- **Version / date.** v1, 2026, tutorial demonstration.
+- **Training.** Cross-entropy loss, Adam optimiser, full-batch epochs (~150–400).
+  Each model trains in a few minutes on CPU.
+- **Version / date.** v2 (adds the transformer and AlphaEarth inputs), 2026,
+  tutorial demonstration.
 
 ## Intended use
 - **Primary.** Educational — to show how a temporal deep-learning model detects
@@ -35,6 +44,16 @@ a demonstration built for the CCAI Summer School 2026 "AI for Forestry" tutorial
 - The curated Amazon SITS dataset described in `DATASHEET.md` (Sentinel-2 NDVI +
   INPE PRODES labels, southern Pará, PRODES 2022). A synthetic fallback is used only
   when the real CSV cannot be downloaded.
+- The AlphaEarth variant uses `data/amazon_alphaearth_samples.csv` (annual 64-d
+  Satellite Embedding vectors at the same 908 points; see `DATASHEET.md`).
+
+## Known leakage caveat (AlphaEarth variant)
+- The embedding CSV ships years 2018–2024, but the labels refer to the PRODES
+  **2022** season. Embeddings for 2023–2024 describe land that was *already
+  cleared* and must not be used as input when reporting detection performance —
+  the tutorial defaults to years ≤ 2022 and demonstrates the metric inflation
+  from post-event years as an explicit label-leakage exercise. Any metric
+  obtained with post-event years included does **not** reflect detection skill.
 
 ## Ethical considerations & risks
 - **Consequences of error.** A false "deforested" prediction could wrongly flag a
@@ -48,6 +67,9 @@ a demonstration built for the CCAI Summer School 2026 "AI for Forestry" tutorial
   safeguards INPE builds around PRODES/DETER.
 
 ## Caveats
-- The model sees only NDVI, so it is blind to forms of change NDVI misses
+- The NDVI models see only NDVI, so they are blind to forms of change NDVI misses
   (degradation, selective logging, some fire). Extending to more bands/indices and to
   spatial (image) models is discussed in the tutorial's "Next Steps".
+- The AlphaEarth features are produced by a proprietary foundation model whose
+  training data and failure modes we cannot audit; an embedding dimension cannot be
+  explained to an affected landholder the way an NDVI drop can.

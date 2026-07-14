@@ -7,7 +7,10 @@ Checks that everything the participants run actually works end-to-end:
      CSV has not been built yet, so the modelling code can always be tested);
   3. the scikit-learn baseline trains and beats chance;
   4. the 1D-CNN trains for a few epochs and beats chance;
-  5. CodeCarbon can instrument a block without crashing.
+  5. CodeCarbon can instrument a block without crashing;
+  6. the time series transformer trains on the NDVI series and beats chance;
+  7. the AlphaEarth embeddings load (real CSV if built, else the synthetic
+     fallback) and the same transformer does a forward/backward pass on them.
 
 Exit code 0 => "all runs great".  Run:  python check_pipeline.py
 """
@@ -18,6 +21,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
 DATA_CSV = REPO / "data" / "amazon_sits_samples.csv"
+AE_CSV = REPO / "data" / "amazon_alphaearth_samples.csv"
+AE_YEARS = list(range(2018, 2023))  # notebook default: up to the target year
+AE_DIMS = 64
 
 PASS, FAIL = "\033[92mPASS\033[0m", "\033[91mFAIL\033[0m"
 results: list[tuple[str, bool, str]] = []
@@ -183,6 +189,118 @@ def _cnn_train():
 
 
 # ---------------------------------------------------------------------------
+# 5/6. time series transformer (same architecture as the notebook)
+# ---------------------------------------------------------------------------
+def build_transformer(n_classes, in_dim=1, seq_len=24,
+                      d_model=32, n_heads=2, n_layers=1, dropout=0.2):
+    import torch
+    import torch.nn as nn
+
+    class SITSTransformer(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.input_proj = nn.Linear(in_dim, d_model)
+            self.pos_embed = nn.Parameter(torch.zeros(1, seq_len, d_model))
+            layer = nn.TransformerEncoderLayer(
+                d_model, n_heads, dim_feedforward=2 * d_model,
+                dropout=dropout, batch_first=True)
+            self.encoder = nn.TransformerEncoder(layer, num_layers=n_layers)
+            self.head = nn.Linear(d_model, n_classes)
+
+        def forward(self, x):  # (B, T, C)
+            h = self.input_proj(x) + self.pos_embed[:, :x.size(1)]
+            return self.head(self.encoder(h).mean(dim=1))
+
+    return SITSTransformer()
+
+
+def _transformer_train():
+    import torch
+    from sklearn.metrics import accuracy_score
+
+    X, y, classes = _xy()
+    Xtr, Xte, ytr, yte = _split(X, y)
+    to_t = lambda a: torch.tensor(a).unsqueeze(-1)  # (N, T, 1)
+    Xtr_t, Xte_t = to_t(Xtr), to_t(Xte)
+    ytr_t = torch.tensor(ytr, dtype=torch.long)
+
+    torch.manual_seed(0)
+    model = build_transformer(len(classes), in_dim=1, seq_len=Xtr.shape[1])
+    opt = torch.optim.Adam(model.parameters(), lr=3e-3)
+    loss_fn = torch.nn.CrossEntropyLoss()
+
+    model.train()
+    for _ in range(150):
+        opt.zero_grad()
+        loss = loss_fn(model(Xtr_t), ytr_t)
+        loss.backward()
+        opt.step()
+
+    model.eval()
+    with torch.no_grad():
+        pred = model(Xte_t).argmax(1).numpy()
+    acc = accuracy_score(yte, pred)
+    chance = 1.0 / len(classes)
+    assert acc > chance + 0.1, f"transformer acc {acc:.2f} not above chance {chance:.2f}"
+    return f"test acc={acc:.3f} after 150 epochs (chance={chance:.3f})"
+
+
+# ---------------------------------------------------------------------------
+# 7. AlphaEarth embeddings (real CSV if built, else synthetic fallback)
+# ---------------------------------------------------------------------------
+def make_synthetic_alphaearth(labels, years=AE_YEARS, n_dims=AE_DIMS, seed=0):
+    """Per-class Gaussian clusters in 64-d; 'deforested' jumps centres in 2022."""
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(seed)
+    centre = {"forest": rng.normal(0, 0.3, n_dims),
+              "old_clearing": rng.normal(0, 0.3, n_dims)}
+    frames = [pd.DataFrame({"label": labels})]
+    for year in years:
+        cols = [f"emb_{year}_{b:02d}" for b in range(n_dims)]
+        mat = np.empty((len(labels), n_dims), dtype=np.float32)
+        for i, lab in enumerate(labels):
+            key = ("old_clearing"
+                   if lab == "old_clearing" or (lab == "deforested" and year >= 2022)
+                   else "forest")
+            mat[i] = centre[key] + rng.normal(0, 0.15, n_dims)
+        frames.append(pd.DataFrame(mat, columns=cols))
+    return pd.concat(frames, axis=1)
+
+
+def _alphaearth():
+    import numpy as np
+    import pandas as pd
+    import torch
+
+    df = globals()["_DF"]
+    if AE_CSV.exists():
+        ae = pd.read_csv(AE_CSV)
+        assert len(ae) == len(df), "embedding CSV not row-aligned with NDVI CSV"
+        src = f"real embeddings ({AE_CSV.name})"
+    else:
+        ae = make_synthetic_alphaearth(df["label"].tolist())
+        src = "SYNTHETIC embeddings (real CSV not built yet)"
+
+    emb_cols = [f"emb_{y}_{b:02d}" for y in AE_YEARS for b in range(AE_DIMS)]
+    valid = ae[emb_cols].notna().all(axis=1).to_numpy()
+    X_emb = (ae.loc[valid, emb_cols].to_numpy("float32")
+             .reshape(valid.sum(), len(AE_YEARS), AE_DIMS))
+    _, y, classes = _xy()
+    y_emb = torch.tensor(y[valid], dtype=torch.long)
+
+    torch.manual_seed(0)
+    model = build_transformer(len(classes), in_dim=AE_DIMS, seq_len=len(AE_YEARS))
+    opt = torch.optim.Adam(model.parameters(), lr=3e-3)
+    loss = torch.nn.CrossEntropyLoss()(model(torch.tensor(X_emb)), y_emb)
+    loss.backward()
+    opt.step()
+    assert np.isfinite(loss.item()), "non-finite loss on embeddings"
+    return f"{src}: X={tuple(X_emb.shape)}, fwd/bwd OK (loss={loss.item():.3f})"
+
+
+# ---------------------------------------------------------------------------
 # 5. CodeCarbon
 # ---------------------------------------------------------------------------
 def _codecarbon():
@@ -206,6 +324,8 @@ def main():
     ok &= check("3. RandomForest baseline", _rf_baseline)
     ok &= check("4. 1D-CNN trains", _cnn_train)
     ok &= check("5. CodeCarbon instrumentation", _codecarbon)
+    ok &= check("6. transformer trains", _transformer_train)
+    ok &= check("7. AlphaEarth embeddings + transformer", _alphaearth)
     print("-" * 66)
     n_pass = sum(1 for _, p, _ in results if p)
     print(f"{n_pass}/{len(results)} checks passed")

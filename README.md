@@ -8,7 +8,8 @@ location as a **time series** of a vegetation index (NDVI) across one year, and
 training models to tell *stable forest*, *freshly deforested*, and *old clearing*
 trajectories apart. The workflow uses real **Sentinel-2** imagery and official
 **INPE PRODES** deforestation labels over an active frontier in the Brazilian
-Amazon.
+Amazon, then extends to **AlphaEarth foundation-model embeddings** (Google's
+Satellite Embedding dataset) read by a small **time series Transformer**.
 
 > **Educational use only.** Nothing here is fit for operational deforestation
 > mapping, enforcement, trade compliance (e.g. EUDR), or any decision affecting
@@ -25,9 +26,12 @@ By the end of the tutorial you can:
    beat a single (often cloudy) image.
 3. **Build** a reproducible labelled dataset from open satellite imagery and
    official labels.
-4. **Train and compare** a classical baseline (Random Forest) with a 1D
-   Convolutional Neural Network.
-5. **Evaluate honestly** — read per-class metrics and a confusion matrix, not just
+4. **Train and compare** a classical baseline (Random Forest), a 1D
+   Convolutional Neural Network and a time series Transformer.
+5. **Compare** hand-crafted features (NDVI) with foundation-model embeddings
+   (AlphaEarth) — and recognise the temporal label-leakage trap that annual
+   embeddings set.
+6. **Evaluate honestly** — read per-class metrics and a confusion matrix, not just
    accuracy — and reason about limitations and responsible use.
 
 ---
@@ -54,7 +58,8 @@ conda activate forestry-ccai
 jupyter lab CCAI_Tutorial_Deforestation_SITS.ipynb
 ```
 
-Smoke-test the whole pipeline (imports, data load, both models, CodeCarbon):
+Smoke-test the whole pipeline (imports, data load, all three model families,
+AlphaEarth embeddings, CodeCarbon):
 
 ```bash
 python check_pipeline.py     # prints PASS/FAIL for each stage
@@ -69,7 +74,10 @@ python check_pipeline.py     # prints PASS/FAIL for each stage
 | `CCAI_Tutorial_Deforestation_SITS.ipynb` | **The tutorial notebook** — the main deliverable. |
 | `data/amazon_sits_samples.csv` | Curated dataset: 908 labelled NDVI time series (24 steps). |
 | `data/metadata.json` | Exact provenance (bbox, dates, temporal grid, sources). |
+| `data/amazon_alphaearth_samples.csv` | AlphaEarth annual embeddings (64-d × 2018–2024) at the same 908 points.* |
+| `data/alphaearth_metadata.json` | Provenance for the embedding CSV.* |
 | `data_prep/build_dataset.py` | Creator-side script that rebuilds the dataset from source. |
+| `data_prep/build_alphaearth.py` | Creator-side script that extracts the AlphaEarth embeddings (needs Earth Engine auth). |
 | `data_prep/make_figures.py` | Generates all figures & GIFs from the real data + pipeline. |
 | `figures/` | Static figures (PNG) and animations (GIF) — see below. |
 | `slides/deforestation_sits.tex` / `.pdf` | Companion LaTeX Beamer deck explaining every step. |
@@ -78,6 +86,9 @@ python check_pipeline.py     # prints PASS/FAIL for each stage
 | `MODEL_CARD.md` | Model documentation (Mitchell et al. 2019). |
 | `QUIZ.md` | Comprehension quiz questions. |
 | `requirements.txt` / `environment.yml` | Pinned dependencies (pip / conda). |
+
+\* Not yet committed: run `data_prep/build_alphaearth.py` once (see below). Until
+then the notebook's Section 9 runs on a clearly-flagged synthetic fallback.
 
 ---
 
@@ -112,6 +123,29 @@ This downloads labels + imagery, cloud-masks via SCL, builds a **maximum-value
 composite** on a regular 15-day grid, gap-fills, samples labelled pixels, and
 writes the CSV plus `metadata.json`. Expect several minutes (network-bound).
 
+### Build the AlphaEarth embedding CSV (creator-side, once)
+
+Section 9 of the notebook uses annual 64-dimensional embeddings from Google's
+[Satellite Embedding dataset](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL)
+(AlphaEarth Foundations), sampled at the same 908 points for years 2018–2024.
+Because the dataset lives in Google Earth Engine (which needs an account), the
+embeddings are pre-extracted once and committed, so participants stay auth-free:
+
+```bash
+pip install earthengine-api
+earthengine authenticate                       # one time
+python data_prep/build_alphaearth.py --project <your-gcloud-project>
+```
+
+This writes `data/amazon_alphaearth_samples.csv` (wide format:
+`lon, lat, label, emb_2018_00 … emb_2024_63`) plus `data/alphaearth_metadata.json`,
+and prints a sanity check (a deforested point should move much further in
+embedding space between 2021 and 2023 than a forest point).
+
+> **Leakage note (by design).** The CSV includes 2023–2024 on purpose: the
+> notebook defaults to years ≤ 2022 and uses the post-event years only in an
+> explicit label-leakage exercise.
+
 ---
 
 ## Figures & animations
@@ -127,6 +161,12 @@ pipeline (spatial split + the actual `SITSCNN`, 150 epochs) so nothing is mocked
 | `anim_03_training.gif` · `fig_03b_training.png` | Training loss & accuracy |
 | `fig_04_confusion.png` | Test-set confusion matrix |
 | `fig_05_inference_map.png` | Predictions across the held-out region |
+| `fig_06_transformer.png` | The `SITSTransformer` architecture |
+| `fig_07_model_comparison.png` | 4-model metric comparison (grouped bars)† |
+| `fig_08_alphaearth_pca.png` | 2-D PCA of the AlphaEarth embeddings† |
+
+† Watermarked as synthetic placeholders until `build_alphaearth.py` has produced
+the real embedding CSV — re-run `make_figures.py` afterwards.
 
 Regenerate them (needs `matplotlib`, `torch`, `pillow`):
 
@@ -142,28 +182,41 @@ identity never rests on colour alone.
 
 ## Method & results
 
-Two models are trained and compared on a **spatial** train/test split (eastern 30%
+Four models are trained and compared on a **spatial** train/test split (eastern 30%
 of the window held out, to avoid leaking correlated neighbouring pixels):
 
 - **Baseline** — Random Forest on the 24 NDVI values as flat features.
-- **Deep model** — `SITSCNN`, a small 1D CNN (two `Conv1d` layers → global average
+- **Deep model 1** — `SITSCNN`, a small 1D CNN (two `Conv1d` layers → global average
   pooling → linear head, <10k parameters) whose convolutions slide along the time
   axis to detect shapes like "a mid-year drop".
+- **Deep model 2** — `SITSTransformer`, a tiny transformer encoder (learned
+  positional embedding, 1 attention layer, ~10k parameters) whose input
+  `(batch, T, C)` is deliberately shape-agnostic.
+- **Deep model 2, new data** — the *same* `SITSTransformer` on the multi-year
+  AlphaEarth embedding series (5 years × 64 dims, leakage-safe default ≤ 2022).
 
 | Model | Accuracy | Macro-F1 | Deforested recall |
 |-------|:--------:|:--------:|:-----------------:|
-| Random Forest (baseline) | **0.68** | **0.59** | **0.39** |
-| 1D CNN | 0.64 | 0.40 | 0.00 |
+| Random Forest (baseline) | 0.68 | **0.59** | **0.39** |
+| 1D CNN | 0.64 | 0.41 | 0.00 |
+| Transformer (NDVI) | **0.69** | 0.58 | 0.22 |
+| Transformer (AlphaEarth) | — | — | — |
+
+*(AlphaEarth numbers pending the real embedding CSV; the notebook prints them
+live once it is built.)*
 
 > ⚠️ **The honest result is the lesson.** On this real, cloudy dataset the simple
-> baseline *beats* the CNN, and the CNN collapses to the majority class —
-> detecting **none** of the deforested pixels. Wet-season cloud drags even stable
-> forest's NDVI down, so forest and fresh clearings barely separate on NDVI alone.
-> This is a deliberate teaching case in **class imbalance**, **weak signals**, and
-> **why accuracy alone misleads** — read the confusion matrix, compare against a
+> baseline still finds the most actual deforestation, the CNN collapses to the
+> majority class — detecting **none** of the deforested pixels — and the
+> transformer lands in between. Wet-season cloud drags even stable forest's NDVI
+> down, so forest and fresh clearings barely separate on NDVI alone. This is a
+> deliberate teaching case in **class imbalance**, **weak signals**, and **why
+> accuracy alone misleads** — read the confusion matrix, compare against a
 > baseline, and look at per-class recall. Strategies to improve it (class
 > weighting, more bands/indices, a cleaner time window, a spatial model) are
-> discussed in the notebook's *Next Steps*.
+> discussed in the notebook's *Next Steps*. Section 9 adds a second lesson:
+> post-event AlphaEarth years boost recall through **temporal label leakage**,
+> not skill.
 
 Numbers depend on the run and dataset version and are printed live in the notebook.
 See **[MODEL_CARD.md](MODEL_CARD.md)** for the full model documentation.
@@ -204,6 +257,10 @@ national scale, repeatedly, is not.
 - Gebru et al., *Datasheets for Datasets*, 2021.
 - Mitchell et al., *Model Cards for Model Reporting*, 2019.
 - EU Deforestation Regulation (EU) 2023/1115.
+- Vaswani et al., *Attention Is All You Need*, 2017.
+- Sainte Fare Garnot & Landrieu, *Lightweight Temporal Self-Attention for
+  Classifying Satellite Image Time Series*, 2020.
+- Brown et al., *AlphaEarth Foundations*, 2025 — [Satellite Embedding dataset](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL).
 
 ---
 

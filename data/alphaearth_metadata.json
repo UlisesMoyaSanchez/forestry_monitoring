@@ -1,0 +1,22 @@
+{
+  "created": "2026-07-14T22:44:05.503107Z",
+  "collection": "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
+  "years": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024
+  ],
+  "scale_m": 10,
+  "n_dims": 64,
+  "n_samples": 908,
+  "aligned_with": "data/amazon_sits_samples.csv",
+  "leakage_note": "PRODES target year is 2022; embeddings for 2023-2024 encode the already-cleared state. The tutorial defaults to years <= 2022 and uses later years only in an explicit label-leakage exercise.",
+  "sources": {
+    "embeddings": "AlphaEarth Foundations annual embeddings (Google DeepMind), via Google Earth Engine",
+    "reference": "Brown et al., 2025, AlphaEarth Foundations"
+  }
+}

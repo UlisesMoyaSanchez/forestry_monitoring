@@ -63,3 +63,29 @@ for the CCAI Summer School 2026 "AI for Forestry" tutorial.*
 - PRODES labels carry their own limitations: 1-ha minimum mapping unit, annual
   cadence, focus on clear-cut (degradation only partially captured).
 - Balanced classes misrepresent the true rarity of deforestation.
+
+---
+
+# Companion dataset — AlphaEarth embeddings (`amazon_alphaearth_samples.csv`)
+
+- **What it is.** Annual 64-dimensional embedding vectors from Google's
+  **Satellite Embedding** dataset (`GOOGLE/SATELLITE_EMBEDDING/V1_ANNUAL`,
+  AlphaEarth Foundations; Brown et al. 2025), sampled at 10 m for the **same 908
+  points** as the NDVI CSV, years **2018–2024**. Wide format:
+  `lon, lat, label, emb_2018_00 … emb_2024_63` (451 columns), values in [−1, 1]
+  rounded to 4 decimals. Rows are aligned one-to-one with
+  `amazon_sits_samples.csv`.
+- **Collection.** Extracted once by the tutorial authors with
+  `data_prep/build_alphaearth.py` via the Google Earth Engine API
+  (`sampleRegions`, scale = 10 m); provenance in `data/alphaearth_metadata.json`.
+  Participants do not need an Earth Engine account.
+- **Derived data caveat.** These are *learned features* from a proprietary
+  foundation model trained on multi-sensor data; their content cannot be fully
+  audited or attributed to specific observations.
+- **Known issue — temporal label leakage.** The class labels refer to the PRODES
+  **2022** season. Embeddings for **2023–2024 describe land that was already
+  cleared** and therefore encode the label. They are included *deliberately* for
+  a leakage exercise; any model evaluated with post-event years as input does
+  not measure detection skill. The tutorial's default uses years ≤ 2022 only.
+- **Missing data.** Points falling in masked pixels for a year yield empty
+  (NaN) embedding columns and are dropped consistently in the notebook.

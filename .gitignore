@@ -22,3 +22,11 @@ emissions.csv
 
 # Large source PDF not meant for the repo
 *.pdf
+
+# LaTeX build artifacts (regenerated from slides/*.tex)
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
